@@ -1,13 +1,16 @@
 import pandas as pd
 import json
 import requests
-import os
-import requests    
+import os   
 from dotenv import load_dotenv
+import markdown2
+import base64
+from io import BytesIO
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-
+#Load the Dataset
 def load_dataset(file_path):
-    """Loads the dataset from a CSV file."""
     try:
         df = pd.read_csv(file_path)
         print(f"Dataset loaded successfully. Shape: {df.shape}")
@@ -15,30 +18,28 @@ def load_dataset(file_path):
     except Exception as e:
         raise RuntimeError(f"Error loading dataset: {e}")
 
-def visualize_data(df, output_dir):
-    """Performs basic visualization and saves plots."""
-    import matplotlib.pyplot as plt
-    import seaborn as sns
 
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Generate correlation heatmap
+#Data Visualization
+def visualize_data(df):
     try:
         correlation = df.corr(numeric_only=True)
         plt.figure(figsize=(12, 8))
         sns.heatmap(correlation, annot=True, cmap='coolwarm')
-        heatmap_path = os.path.join(output_dir, "correlation_heatmap.png")
-        plt.savefig(heatmap_path)
+        
+        # Save the plot to a buffer
+        buf = BytesIO()
+        plt.savefig(buf, format="png")
         plt.close()
-        print(f"Correlation heatmap saved at: {heatmap_path}")
+        buf.seek(0)
+        base64_image = base64.b64encode(buf.read()).decode('utf-8')
+        print("Heatmap generated.")
+        return base64_image
     except Exception as e:
-        print(f"Error generating correlation heatmap: {e}")
+        raise RuntimeError(f"Error generating heatmap: {e}")
 
-    # Return visualization paths
-    return {"correlation_heatmap": heatmap_path}
 
+#Data Analysis
 def analyze_data(df):
-    """Performs basic data analysis and returns a dictionary of findings."""
     try:
         analysis = {
             "num_rows": len(df),
@@ -54,7 +55,6 @@ def analyze_data(df):
 
 
 
-# Function: Get LLM Summary
 # Function: Get LLM Summary
 def llm_summary(analysis):
     
@@ -94,25 +94,49 @@ def llm_summary(analysis):
 
 
 
-# Function: Write Results to README.md
-def write_readme(output_dir, summary, images):
-    with open(f"{output_dir}/README.md", "w") as f:
-        f.write("# Automated Analysis Report\n\n")
-        f.write(summary)
-        f.write("\n\n## Visualizations\n")
-        for img in images:
-            f.write(f"![Visualization]({img})\n")
+def save_to_readme(heatmap_base64, analysis, summary):
+    """Saves all results to a README.md file."""
+    readme_content = f"""
+# Data Analysis Report
 
+## Correlation Heatmap
+![Heatmap](data:image/png;base64,{heatmap_base64})
+
+## Analysis Results
+**Number of Rows:** {analysis["num_rows"]}  
+**Number of Columns:** {analysis["num_columns"]}  
+
+### Missing Values:
+```json
+{json.dumps(analysis["missing_values"], indent=2)}
+```
+
+### Column Types:
+```json
+{json.dumps(analysis["column_types"], indent=2)}
+```
+
+### Summary Statistics:
+```json
+{json.dumps(analysis["summary_statistics"], indent=2)}
+```
+
+## Summary
+{summary}
+    """
+
+    with open("README.md", "w", encoding="utf-8") as f:
+        f.write(readme_content)
+    print("Results saved in README.md")
 
 def main():
     file_path = "goodreads.csv"
-    output_dir = "output"
 
     # Step 1: Load the dataset
     df = load_dataset(file_path)
 
     # Step 2: Visualize the data
-    images = visualize_data(df, output_dir)
+    heatmap_base64 = visualize_data(df)
 
     # Step 3: Analyze the data
     analysis = analyze_data(df)
@@ -120,11 +144,9 @@ def main():
     # Step 4: Generate a summary using LLM
     summary = llm_summary(analysis)
 
-    # Step 5: Save the summary
-    summary_path = os.path.join(output_dir, "summary.txt")
-    with open(summary_path, "w", encoding="utf-8") as f:
-        f.write(summary)
-    print(f"Summary saved at: {summary_path}")
+    # Step 5: Save everything to README.md
+    save_to_readme(heatmap_base64, analysis, summary)
 
 if __name__ == "__main__":
     main()
+
