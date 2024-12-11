@@ -1,124 +1,130 @@
-
-
-import os
-import sys
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from openai import ChatCompletion
+import json
+import requests
+import os
+import requests    
 from dotenv import load_dotenv
-import markdown2
 
-# Load environment variables
-load_dotenv()
-AIPROXY_TOKEN = os.getenv("AIPROXY_TOKEN")
-if not AIPROXY_TOKEN:
-    raise EnvironmentError("AIPROXY_TOKEN not set. Please set it in your environment.")
 
-# Constants
-LLM_MODEL = "gpt-4o-mini"
-OUTPUT_README = "README.md"
-
-# LLM API setup
-class LLMClient:
-    def __init__(self, api_key):
-        self.api_key = api_key
-        self.client = ChatCompletion(api_key=api_key)
-
-    def chat(self, messages, functions=None):
-        return self.client.create(messages=messages, functions=functions, model=LLM_MODEL)
-
-# Helper functions
-def analyze_dataset(file_path):
-    """Analyze the dataset and generate summary statistics."""
-    data = pd.read_csv(file_path)
-    summary = {
-        "shape": data.shape,
-        "columns": [{"name": col, "type": data[col].dtype.name, "sample": data[col].dropna().unique()[:5].tolist()} for col in data.columns],
-        "missing_values": data.isnull().sum().to_dict(),
-        "description": data.describe(include="all").to_dict(),
-    }
-    return data, summary
-
-def visualize_data(data, output_prefix):
-    """Generate visualizations for the dataset."""
-    plt.figure(figsize=(10, 6))
-    sns.heatmap(data.corr(), annot=True, fmt=".2f", cmap="coolwarm")
-    plt.title("Correlation Heatmap")
-    heatmap_path = f"{output_prefix}_heatmap.png"
-    plt.savefig(heatmap_path, dpi=300)
-    plt.close()
-
-    plt.figure(figsize=(10, 6))
-    data.isnull().sum().plot(kind='bar', color='skyblue')
-    plt.title("Missing Values Count")
-    plt.ylabel("Count")
-    plt.xticks(rotation=45)
-    missing_path = f"{output_prefix}_missing.png"
-    plt.savefig(missing_path, dpi=300)
-    plt.close()
-
-    return [heatmap_path, missing_path]
-
-def generate_narrative(llm_client, filename, summary, chart_paths):
-    """Generate a narrative about the dataset and analysis."""
-    prompt = f"""
-    You are an AI analyst. I analyzed a dataset called {filename}. Here are some details:
-    - Dataset shape: {summary['shape']}
-    - Columns: {[f"{col['name']} ({col['type']})" for col in summary['columns']]}
-    - Missing values: {summary['missing_values']}
-    - Summary statistics: {summary['description']}
-
-    Additionally, I generated these visualizations:
-    - Correlation heatmap
-    - Missing values count
-
-    Write a Markdown story summarizing the dataset, analysis, and insights, referencing these visualizations where appropriate.
-    """
-    response = llm_client.chat([{"role": "system", "content": "You are a data analyst."}, {"role": "user", "content": prompt}])
-    return response.choices[0].message.content
-
-# Main script
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: uv run autolysis.py <dataset.csv>")
-        sys.exit(1)
-
-    dataset_path = sys.argv[1]
-    if not os.path.exists(dataset_path):
-        print(f"Error: File '{dataset_path}' not found.")
-        sys.exit(1)
-
+def load_dataset(file_path):
+    """Loads the dataset from a CSV file."""
     try:
-        # Analyze the dataset
-        data, summary = analyze_dataset(dataset_path)
-
-        # Visualize the data
-        output_prefix = os.path.splitext(os.path.basename(dataset_path))[0]
-        chart_paths = visualize_data(data, output_prefix)
-
-        # Initialize LLM client
-        llm_client = LLMClient(api_key=AIPROXY_TOKEN)
-
-        # Generate the narrative
-        narrative = generate_narrative(llm_client, dataset_path, summary, chart_paths)
-
-        # Write results to README.md
-        with open(OUTPUT_README, "w") as readme:
-            readme.write(markdown2.markdown(narrative))
-            for chart in chart_paths:
-                readme.write(f"\n![{os.path.basename(chart)}]({chart})\n")
-
-        print(f"Analysis completed. Results saved in {OUTPUT_README}. Charts: {', '.join(chart_paths)}")
+        df = pd.read_csv(file_path)
+        print(f"Dataset loaded successfully. Shape: {df.shape}")
+        return df
     except Exception as e:
-        print(f"Error: {e}")
-        sys.exit(1)
+        raise RuntimeError(f"Error loading dataset: {e}")
+
+def visualize_data(df, output_dir):
+    """Performs basic visualization and saves plots."""
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Generate correlation heatmap
+    try:
+        correlation = df.corr(numeric_only=True)
+        plt.figure(figsize=(12, 8))
+        sns.heatmap(correlation, annot=True, cmap='coolwarm')
+        heatmap_path = os.path.join(output_dir, "correlation_heatmap.png")
+        plt.savefig(heatmap_path)
+        plt.close()
+        print(f"Correlation heatmap saved at: {heatmap_path}")
+    except Exception as e:
+        print(f"Error generating correlation heatmap: {e}")
+
+    # Return visualization paths
+    return {"correlation_heatmap": heatmap_path}
+
+def analyze_data(df):
+    """Performs basic data analysis and returns a dictionary of findings."""
+    try:
+        analysis = {
+            "num_rows": len(df),
+            "num_columns": len(df.columns),
+            "missing_values": df.isnull().sum().to_dict(),
+            "column_types": df.dtypes.astype(str).to_dict(),
+            "summary_statistics": df.describe(include='all').to_dict()
+        }
+        print("Data analysis completed.")
+        return analysis
+    except Exception as e:
+        raise RuntimeError(f"Error during data analysis: {e}")
+
+
+
+# Function: Get LLM Summary
+# Function: Get LLM Summary
+def llm_summary(analysis):
+    
+
+    # Load API key from .env file
+    load_dotenv()
+    api_key = os.getenv("AIPROXY_TOKEN")
+
+    if not api_key:
+        raise Exception("API key not found. Please set OPENAI_API_KEY in your .env file.")
+
+    url = "https://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+    
+    prompt = f"""
+    Analyze the following dataset metadata and provide insights:
+    {json.dumps(analysis, indent=2)}
+    """
+
+    payload = {
+        "model": "gpt-4o-mini",
+        "messages": [
+            {"role": "system", "content": "You are a data analyst."},
+            {"role": "user", "content": prompt}
+        ]
+    }
+
+    response = requests.post(url, headers=headers, json=payload)
+
+    if response.status_code == 200:
+        return response.json()["choices"][0]["message"]["content"]
+    else:
+        raise Exception(f"Request failed: {response.status_code}, {response.text}")
+
+
+
+# Function: Write Results to README.md
+def write_readme(output_dir, summary, images):
+    with open(f"{output_dir}/README.md", "w") as f:
+        f.write("# Automated Analysis Report\n\n")
+        f.write(summary)
+        f.write("\n\n## Visualizations\n")
+        for img in images:
+            f.write(f"![Visualization]({img})\n")
+
+
+def main():
+    file_path = "goodreads.csv"
+    output_dir = "output"
+
+    # Step 1: Load the dataset
+    df = load_dataset(file_path)
+
+    # Step 2: Visualize the data
+    images = visualize_data(df, output_dir)
+
+    # Step 3: Analyze the data
+    analysis = analyze_data(df)
+
+    # Step 4: Generate a summary using LLM
+    summary = llm_summary(analysis)
+
+    # Step 5: Save the summary
+    summary_path = os.path.join(output_dir, "summary.txt")
+    with open(summary_path, "w", encoding="utf-8") as f:
+        f.write(summary)
+    print(f"Summary saved at: {summary_path}")
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
