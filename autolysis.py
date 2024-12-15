@@ -19,6 +19,12 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import argparse
 
+load_dotenv()
+AIPROXY_TOKEN = os.environ("AIPROXY_TOKEN")
+
+if not AIPROXY_TOKEN:
+    raise Exception("API key not found. Please set AIPROXY_TOKEN in your .env file.")
+
 def load_dataset(file_path):
     """Loads a dataset from a CSV file."""
     try:
@@ -63,16 +69,12 @@ def analyze_data(df):
 
 def llm_summary(analysis):
     """Generates a summary of the dataset using an LLM."""
-    load_dotenv()
-    api_key = os.getenv("AIPROXY_TOKEN")
 
-    if not api_key:
-        raise Exception("API key not found. Please set AIPROXY_TOKEN in your .env file.")
 
     url = "https://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
+        "Authorization": f"Bearer {AIPROXY_TOKEN}"
     }
 
     prompt = f"""
